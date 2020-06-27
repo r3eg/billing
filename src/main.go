@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/sirupsen/logrus"
@@ -34,14 +35,19 @@ const oneMsgSymbolsCount float64 = 160
 
 var db *sqlx.DB
 var tariffsMap sync.Map
+var handledMessages = make(map[string]float64)
 
 func main() {
 	initDB()
 	loadTariffs()
 	go InitMsgConsumer()
-	for {
-
-	}
+	r := gin.New()
+	r.GET("/stat", func(c *gin.Context) {
+		c.JSON(200, getStat())
+	})
+	host := ":14501"
+	logrus.Info("running http server on host: ", host)
+	r.Run(host)
 }
 
 func initDB() {
@@ -75,6 +81,7 @@ func handle(deliveries <-chan amqp.Delivery, done chan error) {
 }
 
 func handleMessage(d *amqp.Delivery) {
+	now := time.Now().UTC()
 	msg := &Message{}
 	if err := json.Unmarshal(d.Body, msg); err != nil {
 		logrus.Error("err parse message: ", err)
@@ -89,6 +96,8 @@ func handleMessage(d *amqp.Delivery) {
 	}
 	d.Ack(false)
 	msg.Cost = tariff.Cost * numMessages
+	after := time.Since(now).Seconds()
+	handledMessages[msg.ID] = after
 	logrus.Info("Message: ", msg.ID, " operator: ", tariff.Name, " client: ", msg.ClientID, " cost: ", msg.Cost)
 }
 
@@ -117,4 +126,20 @@ func getTariff(id string) *Tariff {
 		return nil
 	}
 	return tariff
+}
+
+func getStat() map[string]interface{} {
+	lenHandled := len(handledMessages)
+	var sumTime float64
+	for _, t := range handledMessages {
+		sumTime += t
+	}
+	avgTimeOneMsg := sumTime / float64(lenHandled)
+	rps := 1 / avgTimeOneMsg
+	return map[string]interface{}{
+		"handledMessages":     lenHandled,
+		"sumTime":             sumTime,
+		"avgTimeHandleOneMsg": avgTimeOneMsg,
+		"rps":                 rps,
+	}
 }
