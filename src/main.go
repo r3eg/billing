@@ -35,7 +35,7 @@ const oneMsgSymbolsCount float64 = 160
 
 var db *sqlx.DB
 var tariffsMap sync.Map
-var handledMessages = make(map[string]float64)
+var handledMessages sync.Map
 
 func main() {
 	initDB()
@@ -97,7 +97,7 @@ func handleMessage(d *amqp.Delivery) {
 	d.Ack(false)
 	msg.Cost = tariff.Cost * numMessages
 	after := time.Since(now).Seconds()
-	handledMessages[msg.ID] = after
+	handledMessages.Store(msg.ID, after)
 	logrus.Info("Message: ", msg.ID, " operator: ", tariff.Name, " client: ", msg.ClientID, " cost: ", msg.Cost)
 }
 
@@ -129,11 +129,15 @@ func getTariff(id string) *Tariff {
 }
 
 func getStat() map[string]interface{} {
-	lenHandled := len(handledMessages)
+	lenHandled := 0
 	var sumTime float64
-	for _, t := range handledMessages {
+	handledMessages.Range(func(key, value interface{}) bool {
+		lenHandled++
+		t := value.(float64)
 		sumTime += t
-	}
+		return true
+	})
+
 	avgTimeOneMsg := sumTime / float64(lenHandled)
 	rps := 1 / avgTimeOneMsg
 	return map[string]interface{}{
