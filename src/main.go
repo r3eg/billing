@@ -39,7 +39,17 @@ var handledMessages sync.Map
 
 func main() {
 	initDB()
-	loadTariffs()
+	isTariffsLoaded := false
+	for !isTariffsLoaded {
+		err := loadTariffs()
+		if err != nil {
+			logrus.Error("err load tariffs: ", err, " try again after 20 seconds")
+			time.Sleep(time.Second * 20)
+		} else {
+			isTariffsLoaded = true
+		}
+	}
+
 	go InitMsgConsumer()
 	r := gin.New()
 	r.GET("/stat", func(c *gin.Context) {
@@ -101,17 +111,18 @@ func handleMessage(d *amqp.Delivery) {
 	logrus.Info("Message: ", msg.ID, " operator: ", tariff.Name, " client: ", msg.ClientID, " cost: ", msg.Cost)
 }
 
-func loadTariffs() {
+func loadTariffs() error {
 	data := []Tariff{}
 	err := db.Select(&data, `SELECT * FROM tariff`)
 	if err != nil {
 		logrus.Error("err get tariffs data: ", err)
-		return
+		return err
 	}
 	for i := 0; i < len(data); i++ {
 		tariff := data[i]
 		tariffsMap.Store(tariff.ID, &tariff)
 	}
+	return nil
 }
 
 func getTariff(id string) *Tariff {
